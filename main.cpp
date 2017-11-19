@@ -11,7 +11,7 @@
 #include <dinput.h>
 #include <tchar.h>
 
-#include "TextEditor.h"
+#include "ImGuiColorTextEdit/TextEditor.h"
 
 // Data
 static ID3D11Device*            g_pd3dDevice = NULL;
