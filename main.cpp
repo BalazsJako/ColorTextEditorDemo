@@ -220,33 +220,60 @@ int main(int, char**)
 
 		//ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(.07f, .07f, .07f, 1.0f));
 		ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(.07f, .07f, .07f, 1.0f));
-		//ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2.0f, 2.0f));
 
 		auto cpos = editor.GetCursorPosition();
-		ImGui::Begin("Text Editor", nullptr, ImGuiWindowFlags_HorizontalScrollbar);
+		ImGui::Begin("Text Editor Demo - main.cpp", nullptr, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_MenuBar);
+		ImGui::SetWindowSize(ImVec2(800, 600), ImGuiCond_FirstUseEver);
 		if (ImGui::BeginMenuBar())
 		{
+			if (ImGui::BeginMenu("File"))
+			{
+				if (ImGui::MenuItem("Save"))
+				{
+					auto t = editor.GetText();
+					/// save text in t....
+				}
+				if (ImGui::MenuItem("Quit", "Alt-F4"))
+					break;
+				ImGui::EndMenu();
+			}
+			if (ImGui::BeginMenu("Edit"))
+			{
+				bool ro = editor.IsReadOnly();
+				if (ImGui::MenuItem("Read-only mode", nullptr, &ro))
+					editor.SetReadOnly(ro);
+				ImGui::Separator();
+
+				if (ImGui::MenuItem("Undo", "ALT-Backspace", nullptr, !ro && editor.CanUndo()))
+					editor.Undo();
+				if (ImGui::MenuItem("Redo", "Ctrl-Y", nullptr, !ro && editor.CanRedo()))
+					editor.Redo();
+
+				ImGui::Separator();
+
+				if (ImGui::MenuItem("Copy", "Ctrl-C", nullptr, editor.HasSelection()))
+					editor.Copy();
+				if (ImGui::MenuItem("Cut", "Ctrl-X", nullptr, !ro && editor.HasSelection()))
+					editor.Cut();
+				if (ImGui::MenuItem("Delete", "Del", nullptr, !ro && editor.HasSelection()))
+					editor.Delete();
+				if (ImGui::MenuItem("Paste", "Ctrl-V", nullptr, !ro && ImGui::GetClipboardText() != nullptr))
+					editor.Paste();
+
+				ImGui::Separator();
+
+				if (ImGui::MenuItem("Select all", nullptr, nullptr))
+					editor.SetSelection(TextEditor::Coordinates(), TextEditor::Coordinates(editor.GetTotalLines(), 0));
+
+				ImGui::EndMenu();
+			}
 			ImGui::EndMenuBar();
 		}
 
-		if (ImGui::Button("  Save  "))
-		{
-			auto t = editor.GetText();
-			/// save text....
-		}
-		
-		ImGui::SameLine();
-
-		bool ro = editor.IsReadOnly();
-		if (ImGui::Checkbox("Read-only", &ro))
-			editor.SetReadOnly(ro);
-
-		ImGui::SameLine();
-
-		ImGui::Text("%6d/%-6d %6d lines  %s %s | %s | %s", cpos.mLine + 1, cpos.mColumn + 1, editor.GetTotalLines(),
+		ImGui::Text("%6d/%-6d %6d lines  | %s | %s | %s | %s", cpos.mLine + 1, cpos.mColumn + 1, editor.GetTotalLines(),
 			editor.IsOverwrite() ? "Ovr" : "Ins",
 			editor.CanUndo() ? "*" : " ",
-			editor.GetLanguageDefinition().mName.c_str(), "ExampleFileName.txt");
+			editor.GetLanguageDefinition().mName.c_str(), "main.cpp");
 
 		editor.Render("TextEditor");
 		ImGui::End();
