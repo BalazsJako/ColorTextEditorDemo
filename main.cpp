@@ -188,6 +188,7 @@ int main(int, char**)
 		lang.mIdentifiers.insert(std::make_pair(std::string(identifiers[i]), id));
 	}
 	editor.SetLanguageDefinition(lang);
+	//editor.SetPalette(TextEditor::GetLightPalette());
 
 	// error markers
 	TextEditor::ErrorMarkers markers;
@@ -201,6 +202,7 @@ int main(int, char**)
 	//bpts.insert(47);
 	//editor.SetBreakpoints(bpts);
 
+//	std::ifstream t("ImGuiColorTextEdit/TextEditor.cpp");
 	std::ifstream t("main.cpp");
 	std::string str((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
 	editor.SetText(str);
@@ -217,9 +219,6 @@ int main(int, char**)
 			continue;
 		}
 		ImGui_ImplDX11_NewFrame();
-
-		//ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(.07f, .07f, .07f, 1.0f));
-		ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(.07f, .07f, .07f, 1.0f));
 
 		auto cpos = editor.GetCursorPosition();
 		ImGui::Begin("Text Editor Demo - main.cpp", nullptr, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_MenuBar);
@@ -267,6 +266,15 @@ int main(int, char**)
 
 				ImGui::EndMenu();
 			}
+
+			if (ImGui::BeginMenu("View"))
+			{
+				if (ImGui::MenuItem("Dark palette"))
+					editor.SetPalette(TextEditor::GetDarkPalette());
+				if (ImGui::MenuItem("Light palette"))
+					editor.SetPalette(TextEditor::GetLightPalette());
+				ImGui::EndMenu();
+			}
 			ImGui::EndMenuBar();
 		}
 
@@ -277,9 +285,6 @@ int main(int, char**)
 
 		editor.Render("TextEditor");
 		ImGui::End();
-
-		//ImGui::PopStyleVar();
-		ImGui::PopStyleColor();
 
 		// Rendering
 		g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, (float*)&clear_col);
