@@ -41,3 +41,6 @@
 *.ini
 *.iobj
 *.ipdb
+*.ipch
+.vs/directx11_example/v15/.suo
+*.enc

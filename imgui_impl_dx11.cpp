@@ -1,34 +1,47 @@
-// ImGui Win32 + DirectX11 binding
-// In this binding, ImTextureID is used to store a 'ID3D11ShaderResourceView*' texture identifier. Read the FAQ about ImTextureID in imgui.cpp.
+// dear imgui: Renderer for DirectX11
+// This needs to be used along with a Platform Binding (e.g. Win32)
+
+// Implemented features:
+//  [X] Renderer: User texture binding. Use 'ID3D11ShaderResourceView*' as ImTextureID. Read the FAQ about ImTextureID in imgui.cpp.
 
 // You can copy and use unmodified imgui_impl_* files in your project. See main.cpp for an example of using this.
-// If you use this binding you'll need to call 4 functions: ImGui_ImplXXXX_Init(), ImGui_ImplXXXX_NewFrame(), ImGui::Render() and ImGui_ImplXXXX_Shutdown().
-// If you are new to ImGui, see examples/README.txt and documentation at the top of imgui.cpp.
+// If you are new to dear imgui, read examples/README.txt and read the documentation at the top of imgui.cpp
 // https://github.com/ocornut/imgui
+
+// CHANGELOG
+// (minor and older changes stripped away, please see git history for details)
+//  2018-12-03: Misc: Added #pragma comment statement to automatically link with d3dcompiler.lib when using D3DCompile().
+//  2018-11-30: Misc: Setting up io.BackendRendererName so it can be displayed in the About Window.
+//  2018-08-01: DirectX11: Querying for IDXGIFactory instead of IDXGIFactory1 to increase compatibility.
+//  2018-07-13: DirectX11: Fixed unreleased resources in Init and Shutdown functions.
+//  2018-06-08: Misc: Extracted imgui_impl_dx11.cpp/.h away from the old combined DX11+Win32 example.
+//  2018-06-08: DirectX11: Use draw_data->DisplayPos and draw_data->DisplaySize to setup projection matrix and clipping rectangle.
+//  2018-02-16: Misc: Obsoleted the io.RenderDrawListsFn callback and exposed ImGui_ImplDX11_RenderDrawData() in the .h file so you can call it yourself.
+//  2018-02-06: Misc: Removed call to ImGui::Shutdown() which is not available from 1.60 WIP, user needs to call CreateContext/DestroyContext themselves.
+//  2016-05-07: DirectX11: Disabling depth-write.
 
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
 
 // DirectX
+#include <stdio.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
-#define DIRECTINPUT_VERSION 0x0800
-#include <dinput.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "d3dcompiler") // Automatically link with d3dcompiler.lib as we are using D3DCompile() below.
+#endif
 
-// Data
-static INT64                    g_Time = 0;
-static INT64                    g_TicksPerSecond = 0;
-
-static HWND                     g_hWnd = 0;
+// DirectX data
 static ID3D11Device*            g_pd3dDevice = NULL;
 static ID3D11DeviceContext*     g_pd3dDeviceContext = NULL;
+static IDXGIFactory*            g_pFactory = NULL;
 static ID3D11Buffer*            g_pVB = NULL;
 static ID3D11Buffer*            g_pIB = NULL;
-static ID3D10Blob *             g_pVertexShaderBlob = NULL;
+static ID3D10Blob*              g_pVertexShaderBlob = NULL;
 static ID3D11VertexShader*      g_pVertexShader = NULL;
 static ID3D11InputLayout*       g_pInputLayout = NULL;
 static ID3D11Buffer*            g_pVertexConstantBuffer = NULL;
-static ID3D10Blob *             g_pPixelShaderBlob = NULL;
+static ID3D10Blob*              g_pPixelShaderBlob = NULL;
 static ID3D11PixelShader*       g_pPixelShader = NULL;
 static ID3D11SamplerState*      g_pFontSampler = NULL;
 static ID3D11ShaderResourceView*g_pFontTextureView = NULL;
@@ -39,13 +52,12 @@ static int                      g_VertexBufferSize = 5000, g_IndexBufferSize = 1
 
 struct VERTEX_CONSTANT_BUFFER
 {
-    float        mvp[4][4];
+    float   mvp[4][4];
 };
 
-// This is the main rendering function that you have to implement and provide to ImGui (via setting up 'RenderDrawListsFn' in the ImGuiIO structure)
-// If text or lines are blurry when integrating ImGui in your engine:
-// - in your Render function, try translating your projection matrix by (0.5f,0.5f) or (0.375f,0.375f)
-void ImGui_ImplDX11_RenderDrawLists(ImDrawData* draw_data)
+// Render function
+// (this used to be set in io.RenderDrawListsFn and called by ImGui::Render(), but you can now call this directly from your main loop)
+void ImGui_ImplDX11_RenderDrawData(ImDrawData* draw_data)
 {
     ID3D11DeviceContext* ctx = g_pd3dDeviceContext;
 
@@ -98,15 +110,16 @@ void ImGui_ImplDX11_RenderDrawLists(ImDrawData* draw_data)
     ctx->Unmap(g_pIB, 0);
 
     // Setup orthographic projection matrix into our constant buffer
+    // Our visible imgui space lies from draw_data->DisplayPos (top left) to draw_data->DisplayPos+data_data->DisplaySize (bottom right). 
     {
         D3D11_MAPPED_SUBRESOURCE mapped_resource;
         if (ctx->Map(g_pVertexConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_resource) != S_OK)
             return;
         VERTEX_CONSTANT_BUFFER* constant_buffer = (VERTEX_CONSTANT_BUFFER*)mapped_resource.pData;
-        float L = 0.0f;
-        float R = ImGui::GetIO().DisplaySize.x;
-        float B = ImGui::GetIO().DisplaySize.y;
-        float T = 0.0f;
+        float L = draw_data->DisplayPos.x;
+        float R = draw_data->DisplayPos.x + draw_data->DisplaySize.x;
+        float T = draw_data->DisplayPos.y;
+        float B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
         float mvp[4][4] =
         {
             { 2.0f/(R-L),   0.0f,           0.0f,       0.0f },
@@ -163,11 +176,11 @@ void ImGui_ImplDX11_RenderDrawLists(ImDrawData* draw_data)
     // Setup viewport
     D3D11_VIEWPORT vp;
     memset(&vp, 0, sizeof(D3D11_VIEWPORT));
-    vp.Width = ImGui::GetIO().DisplaySize.x;
-    vp.Height = ImGui::GetIO().DisplaySize.y;
+    vp.Width =  draw_data->DisplaySize.x;
+    vp.Height = draw_data->DisplaySize.y;
     vp.MinDepth = 0.0f;
     vp.MaxDepth = 1.0f;
-    vp.TopLeftX = vp.TopLeftY = 0.0f;
+    vp.TopLeftX = vp.TopLeftY = 0;
     ctx->RSSetViewports(1, &vp);
 
     // Bind shader and vertex buffers
@@ -191,6 +204,7 @@ void ImGui_ImplDX11_RenderDrawLists(ImDrawData* draw_data)
     // Render command lists
     int vtx_offset = 0;
     int idx_offset = 0;
+    ImVec2 pos = draw_data->DisplayPos;
     for (int n = 0; n < draw_data->CmdListsCount; n++)
     {
         const ImDrawList* cmd_list = draw_data->CmdLists[n];
@@ -199,13 +213,18 @@ void ImGui_ImplDX11_RenderDrawLists(ImDrawData* draw_data)
             const ImDrawCmd* pcmd = &cmd_list->CmdBuffer[cmd_i];
             if (pcmd->UserCallback)
             {
+                // User callback (registered via ImDrawList::AddCallback)
                 pcmd->UserCallback(cmd_list, pcmd);
             }
             else
             {
-                const D3D11_RECT r = { (LONG)pcmd->ClipRect.x, (LONG)pcmd->ClipRect.y, (LONG)pcmd->ClipRect.z, (LONG)pcmd->ClipRect.w };
-                ctx->PSSetShaderResources(0, 1, (ID3D11ShaderResourceView**)&pcmd->TextureId);
+                // Apply scissor/clipping rectangle
+                const D3D11_RECT r = { (LONG)(pcmd->ClipRect.x - pos.x), (LONG)(pcmd->ClipRect.y - pos.y), (LONG)(pcmd->ClipRect.z - pos.x), (LONG)(pcmd->ClipRect.w - pos.y) };
                 ctx->RSSetScissorRects(1, &r);
+
+                // Bind texture, Draw
+                ID3D11ShaderResourceView* texture_srv = (ID3D11ShaderResourceView*)pcmd->TextureId;
+                ctx->PSSetShaderResources(0, 1, &texture_srv);
                 ctx->DrawIndexed(pcmd->ElemCount, idx_offset, vtx_offset);
             }
             idx_offset += pcmd->ElemCount;
@@ -230,53 +249,6 @@ void ImGui_ImplDX11_RenderDrawLists(ImDrawData* draw_data)
     ctx->IASetIndexBuffer(old.IndexBuffer, old.IndexBufferFormat, old.IndexBufferOffset); if (old.IndexBuffer) old.IndexBuffer->Release();
     ctx->IASetVertexBuffers(0, 1, &old.VertexBuffer, &old.VertexBufferStride, &old.VertexBufferOffset); if (old.VertexBuffer) old.VertexBuffer->Release();
     ctx->IASetInputLayout(old.InputLayout); if (old.InputLayout) old.InputLayout->Release();
-}
-
-IMGUI_API LRESULT ImGui_ImplDX11_WndProcHandler(HWND, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-    ImGuiIO& io = ImGui::GetIO();
-    switch (msg)
-    {
-    case WM_LBUTTONDOWN:
-        io.MouseDown[0] = true;
-        return true;
-    case WM_LBUTTONUP:
-        io.MouseDown[0] = false;
-        return true;
-    case WM_RBUTTONDOWN:
-        io.MouseDown[1] = true;
-        return true;
-    case WM_RBUTTONUP:
-        io.MouseDown[1] = false;
-        return true;
-    case WM_MBUTTONDOWN:
-        io.MouseDown[2] = true;
-        return true;
-    case WM_MBUTTONUP:
-        io.MouseDown[2] = false;
-        return true;
-    case WM_MOUSEWHEEL:
-        io.MouseWheel += GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? +1.0f : -1.0f;
-        return true;
-    case WM_MOUSEMOVE:
-        io.MousePos.x = (signed short)(lParam);
-        io.MousePos.y = (signed short)(lParam >> 16);
-        return true;
-    case WM_KEYDOWN:
-        if (wParam < 256)
-            io.KeysDown[wParam] = 1;
-        return true;
-    case WM_KEYUP:
-        if (wParam < 256)
-            io.KeysDown[wParam] = 0;
-        return true;
-    case WM_CHAR:
-        // You can also use ToAscii()+GetKeyboardState() to retrieve characters.
-        if (wParam > 0 && wParam < 0x10000)
-            io.AddInputCharacter((unsigned short)wParam);
-        return true;
-    }
-    return 0;
 }
 
 static void ImGui_ImplDX11_CreateFontsTexture()
@@ -320,7 +292,7 @@ static void ImGui_ImplDX11_CreateFontsTexture()
     }
 
     // Store our identifier
-    io.Fonts->TexID = (void *)g_pFontTextureView;
+    io.Fonts->TexID = (ImTextureID)g_pFontTextureView;
 
     // Create texture sampler
     {
@@ -388,7 +360,8 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
             return false;
 
         // Create the input layout
-        D3D11_INPUT_ELEMENT_DESC local_layout[] = {
+        D3D11_INPUT_ELEMENT_DESC local_layout[] = 
+        {
             { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,   0, (size_t)(&((ImDrawVert*)0)->pos), D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,   0, (size_t)(&((ImDrawVert*)0)->uv),  D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (size_t)(&((ImDrawVert*)0)->col), D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -500,40 +473,26 @@ void    ImGui_ImplDX11_InvalidateDeviceObjects()
     if (g_pVertexShaderBlob) { g_pVertexShaderBlob->Release(); g_pVertexShaderBlob = NULL; }
 }
 
-bool    ImGui_ImplDX11_Init(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* device_context)
+bool    ImGui_ImplDX11_Init(ID3D11Device* device, ID3D11DeviceContext* device_context)
 {
-    g_hWnd = (HWND)hwnd;
-    g_pd3dDevice = device;
-    g_pd3dDeviceContext = device_context;
-
-    if (!QueryPerformanceFrequency((LARGE_INTEGER *)&g_TicksPerSecond))
-        return false;
-    if (!QueryPerformanceCounter((LARGE_INTEGER *)&g_Time))
-        return false;
-
     ImGuiIO& io = ImGui::GetIO();
-    io.KeyMap[ImGuiKey_Tab] = VK_TAB;                       // Keyboard mapping. ImGui will use those indices to peek into the io.KeyDown[] array that we will update during the application lifetime.
-    io.KeyMap[ImGuiKey_LeftArrow] = VK_LEFT;
-    io.KeyMap[ImGuiKey_RightArrow] = VK_RIGHT;
-    io.KeyMap[ImGuiKey_UpArrow] = VK_UP;
-    io.KeyMap[ImGuiKey_DownArrow] = VK_DOWN;
-    io.KeyMap[ImGuiKey_PageUp] = VK_PRIOR;
-    io.KeyMap[ImGuiKey_PageDown] = VK_NEXT;
-    io.KeyMap[ImGuiKey_Home] = VK_HOME;
-    io.KeyMap[ImGuiKey_End] = VK_END;
-    io.KeyMap[ImGuiKey_Delete] = VK_DELETE;
-    io.KeyMap[ImGuiKey_Backspace] = VK_BACK;
-    io.KeyMap[ImGuiKey_Enter] = VK_RETURN;
-    io.KeyMap[ImGuiKey_Escape] = VK_ESCAPE;
-    io.KeyMap[ImGuiKey_A] = 'A';
-    io.KeyMap[ImGuiKey_C] = 'C';
-    io.KeyMap[ImGuiKey_V] = 'V';
-    io.KeyMap[ImGuiKey_X] = 'X';
-    io.KeyMap[ImGuiKey_Y] = 'Y';
-    io.KeyMap[ImGuiKey_Z] = 'Z';
+    io.BackendRendererName = "imgui_impl_dx11";
 
-    io.RenderDrawListsFn = ImGui_ImplDX11_RenderDrawLists;  // Alternatively you can set this to NULL and call ImGui::GetDrawData() after ImGui::Render() to get the same ImDrawData pointer.
-    io.ImeWindowHandle = g_hWnd;
+    // Get factory from device
+    IDXGIDevice* pDXGIDevice = NULL;
+    IDXGIAdapter* pDXGIAdapter = NULL;
+    IDXGIFactory* pFactory = NULL;
+
+    if (device->QueryInterface(IID_PPV_ARGS(&pDXGIDevice)) == S_OK)
+        if (pDXGIDevice->GetParent(IID_PPV_ARGS(&pDXGIAdapter)) == S_OK)
+            if (pDXGIAdapter->GetParent(IID_PPV_ARGS(&pFactory)) == S_OK)
+            {
+                g_pd3dDevice = device;
+                g_pd3dDeviceContext = device_context;
+                g_pFactory = pFactory;
+            }
+    if (pDXGIDevice) pDXGIDevice->Release();
+    if (pDXGIAdapter) pDXGIAdapter->Release();
 
     return true;
 }
@@ -541,44 +500,13 @@ bool    ImGui_ImplDX11_Init(void* hwnd, ID3D11Device* device, ID3D11DeviceContex
 void ImGui_ImplDX11_Shutdown()
 {
     ImGui_ImplDX11_InvalidateDeviceObjects();
-    ImGui::Shutdown();
+    if (g_pFactory) { g_pFactory->Release(); g_pFactory = NULL; }
     g_pd3dDevice = NULL;
     g_pd3dDeviceContext = NULL;
-    g_hWnd = (HWND)0;
 }
 
 void ImGui_ImplDX11_NewFrame()
 {
     if (!g_pFontSampler)
         ImGui_ImplDX11_CreateDeviceObjects();
-
-    ImGuiIO& io = ImGui::GetIO();
-
-    // Setup display size (every frame to accommodate for window resizing)
-    RECT rect;
-    GetClientRect(g_hWnd, &rect);
-    io.DisplaySize = ImVec2((float)(rect.right - rect.left), (float)(rect.bottom - rect.top));
-
-    // Setup time step
-    INT64 current_time;
-    QueryPerformanceCounter((LARGE_INTEGER *)&current_time);
-    io.DeltaTime = (float)(current_time - g_Time) / g_TicksPerSecond;
-    g_Time = current_time;
-
-    // Read keyboard modifiers inputs
-    io.KeyCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    io.KeyShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    io.KeyAlt = (GetKeyState(VK_MENU) & 0x8000) != 0;
-    io.KeySuper = false;
-    // io.KeysDown : filled by WM_KEYDOWN/WM_KEYUP events
-    // io.MousePos : filled by WM_MOUSEMOVE events
-    // io.MouseDown : filled by WM_*BUTTON* events
-    // io.MouseWheel : filled by WM_MOUSEWHEEL events
-
-    // Hide OS mouse cursor if ImGui is drawing it
-    if (io.MouseDrawCursor)
-        SetCursor(NULL);
-
-    // Start the frame
-    ImGui::NewFrame();
 }

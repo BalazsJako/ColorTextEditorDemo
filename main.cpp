@@ -5,6 +5,7 @@
 #include <streambuf>
 
 #include "imgui.h"
+#include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #include <d3d11.h>
 #define DIRECTINPUT_VERSION 0x0800
@@ -18,6 +19,8 @@ static ID3D11Device*            g_pd3dDevice = NULL;
 static ID3D11DeviceContext*     g_pd3dDeviceContext = NULL;
 static IDXGISwapChain*          g_pSwapChain = NULL;
 static ID3D11RenderTargetView*  g_mainRenderTargetView = NULL;
+
+IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 void CreateRenderTarget()
 {
@@ -82,10 +85,10 @@ void CleanupDeviceD3D()
 	if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = NULL; }
 }
 
-extern LRESULT ImGui_ImplDX11_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+//extern LRESULT ImGui_ImplDX11_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	if (ImGui_ImplDX11_WndProcHandler(hWnd, msg, wParam, lParam))
+	if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
 		return true;
 
 	switch (msg)
@@ -130,8 +133,11 @@ int main(int, char**)
 	ShowWindow(hwnd, SW_SHOWDEFAULT);
 	UpdateWindow(hwnd);
 
+	ImGui::CreateContext();
+
 	// Setup ImGui binding
-	ImGui_ImplDX11_Init(hwnd, g_pd3dDevice, g_pd3dDeviceContext);
+	ImGui_ImplWin32_Init(hwnd);
+	ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
 
 	// Load Fonts
 	// (there is a default font, this is only if you want to change it. see extra_fonts/README.txt for more details)
@@ -226,6 +232,8 @@ int main(int, char**)
 			continue;
 		}
 		ImGui_ImplDX11_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
 
 		ImGui::ShowTestWindow();
 
@@ -282,6 +290,8 @@ int main(int, char**)
 					editor.SetPalette(TextEditor::GetDarkPalette());
 				if (ImGui::MenuItem("Light palette"))
 					editor.SetPalette(TextEditor::GetLightPalette());
+				if (ImGui::MenuItem("Retro blue palette"))
+					editor.SetPalette(TextEditor::GetRetroBluePalette());
 				ImGui::EndMenu();
 			}
 			ImGui::EndMenuBar();
@@ -298,12 +308,13 @@ int main(int, char**)
 		// Rendering
 		g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, (float*)&clear_col);
 		ImGui::Render();
-
+		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 		g_pSwapChain->Present(1, 0); // Present with vsync
 		//g_pSwapChain->Present(0, 0); // Present without vsync
 	}
 
 	ImGui_ImplDX11_Shutdown();
+	ImGui_ImplWin32_Shutdown();
 	CleanupDeviceD3D();
 	UnregisterClass(_T("ImGui Example"), wc.hInstance);
 
